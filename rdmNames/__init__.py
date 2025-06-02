@@ -11,11 +11,10 @@ import random
 import threading
 import numpy as np
 from os.path import abspath, join, dirname, exists
-from typing import Dict, List, Optional, Tuple, Union, TypeVar, Generator, Any
-import functools
+from typing import Dict, List, Optional, Tuple, Union, TypeVar, Generic, Any, Generator
 
-__version__ = '1.1.0'
-__author__ = 'Near Skys'
+__version__ = '1.0.0'
+__author__ = 'Seu Nome'
 __license__ = 'MIT'
 
 # Type aliases
@@ -100,84 +99,57 @@ def _get_random_name(names: NameData) -> str:
     return names[min(idx, len(names) - 1)][0]
 
 def get_first_name(gender: Optional[str] = None) -> str:
-    """Retorna um primeiro nome aleatório.
+    """Retorna um primeiro nome aleatório."""
+    if gender not in ('male', 'female'):
+        gender = random.choice(('male', 'female'))
     
-    Args:
-        gender: 'male', 'female' ou None para aleatório
-        
-    Returns:
-        str: Primeiro nome capitalizado
-    """
-    if not FIRST_NAMES:
-        _load_all_names()
-    return random.choice(FIRST_NAMES)
+    filename = FILES[f'first:{gender}']
+    names = _load_names(filename)
+    return _get_random_name(names).capitalize()
 
 def get_last_name() -> str:
-    """Retorna um sobrenome aleatório.
-    
-    Returns:
-        str: Sobrenome capitalizado
-    """
-    if not LAST_NAMES:
-        _load_all_names()
-    return random.choice(LAST_NAMES)
+    """Retorna um sobrenome aleatório."""
+    filename = FILES['last']
+    names = _load_names(filename)
+    return _get_random_name(names).capitalize()
 
 def get_full_name(gender: Optional[str] = None) -> str:
-    """Retorna um nome completo aleatório.
-    
-    Args:
-        gender: 'male', 'female' ou None para aleatório
-        
-    Returns:
-        str: Nome completo no formato "PrimeiroNome Sobrenome"
-    """
-    if not FIRST_NAMES or not LAST_NAMES:
-        _load_all_names()
-    return f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}"
+    """Retorna um nome completo aleatório."""
+    return f"{get_first_name(gender)} {get_last_name()}"
 
-# Variáveis globais para armazenar os nomes em memória
+# Otimização: Pré-carrega os dados na primeira importação
+# Isso garante que o carregamento ocorra apenas uma vez
+_ = _load_names(FILES['last'])
+_ = _load_names(FILES['first:male'])
+_ = _load_names(FILES['first:female'])
+
+# Carrega todos os nomes em listas para acesso rápido
 FIRST_NAMES = []
 LAST_NAMES = []
-_LOADED = False
-_LOCK = threading.RLock()
 
 def _load_all_names() -> None:
-    """Carrega todos os nomes em memória para acesso rápido."""
-    global FIRST_NAMES, LAST_NAMES, _LOADED
+    """Carrega todos os nomes em listas para acesso rápido."""
+    global FIRST_NAMES, LAST_NAMES
     
-    # Usa double-checked locking para thread safety
-    if _LOADED:
-        return
-        
-    with _LOCK:
-        if _LOADED:  # Verifica novamente dentro do lock
-            return
-            
-        try:
-            # Carrega nomes masculinos
-            with open(FILES['first:male'], 'r', encoding='utf-8') as f:
-                male_names = [line.split()[0].capitalize() for line in f]
-            
-            # Carrega nomes femininos
-            with open(FILES['first:female'], 'r', encoding='utf-8') as f:
-                female_names = [line.split()[0].capitalize() for line in f]
-            
-            # Carrega sobrenomes
-            with open(FILES['last'], 'r', encoding='utf-8') as f:
-                LAST_NAMES[:] = [line.split()[0].capitalize() for line in f]
-            
-            # Combina nomes masculinos e femininos
-            FIRST_NAMES[:] = male_names + female_names
-            _LOADED = True
-            
-        except Exception as e:
-            raise RuntimeError(f"Falha ao carregar os arquivos de nomes: {str(e)}")
+    # Carrega nomes masculinos
+    male_names = []
+    with open(FILES['first:male'], 'r', encoding='utf-8') as f:
+        male_names = [line.split()[0].capitalize() for line in f]
+    
+    # Carrega nomes femininos
+    female_names = []
+    with open(FILES['first:female'], 'r', encoding='utf-8') as f:
+        female_names = [line.split()[0].capitalize() for line in f]
+    
+    # Carrega sobrenomes
+    with open(FILES['last'], 'r', encoding='utf-8') as f:
+        LAST_NAMES = [line.split()[0].capitalize() for line in f]
+    
+    # Combina nomes masculinos e femininos
+    FIRST_NAMES = male_names + female_names
 
-# Tenta carregar os nomes na importação, mas não falha se não conseguir
-try:
-    _load_all_names()
-except Exception:
-    pass
+# Carrega todos os nomes na inicialização
+_load_all_names()
 
 def generate_names_batch(batch_size: int = 100_000) -> List[str]:
     """
@@ -189,10 +161,6 @@ def generate_names_batch(batch_size: int = 100_000) -> List[str]:
     Returns:
         Lista de strings no formato "PrimeiroNome Sobrenome"
     """
-    if not _LOADED:
-        _load_all_names()
-        
-    # Usa numpy para geração vetorizada
     firsts = np.random.choice(FIRST_NAMES, size=batch_size)
     lasts = np.random.choice(LAST_NAMES, size=batch_size)
     return [f"{first} {last}" for first, last in zip(firsts, lasts)]
@@ -214,33 +182,23 @@ def generate_names(total: int, batch_size: int = 100_000) -> Generator[List[str]
         yield generate_names_batch(current_batch)
         remaining -= current_batch
 
-def generate_names_to_file(total: int, output_file: str, batch_size: int = 1_000_000) -> None:
+def generate_names_to_file(total: int, output_file: str, batch_size: int = 100_000) -> None:
     """
     Gera nomes e salva em um arquivo de forma otimizada.
     
     Args:
         total: Número total de nomes a serem gerados
         output_file: Caminho do arquivo de saída
-        batch_size: Tamanho de cada lote (padrão: 1,000,000)
+        batch_size: Tamanho de cada lote (padrão: 100,000)
     """
-    if not _LOADED:
-        _load_all_names()
-        
     # Cria o diretório de saída se não existir
     output_dir = dirname(abspath(output_file))
     if output_dir and not exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
     
-    # Usa buffer grande para escrita em arquivo
-    buffer_size = 16 * 1024 * 1024  # 16MB buffer
-    
-    with open(output_file, 'w', encoding='utf-8', buffering=buffer_size) as f:
-        remaining = total
-        while remaining > 0:
-            current_batch = min(batch_size, remaining)
-            names = generate_names_batch(current_batch)
-            f.write('\n'.join(names) + '\n')
-            remaining -= current_batch
+    # Cria o arquivo vazio
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write('')  # Cria o arquivo vazio
     
     # Gera e salva em lotes
     for batch in generate_names(total, batch_size):
